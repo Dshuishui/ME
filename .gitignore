@@ -1,5 +1,6 @@
 # Private documents and data (not for public release)
 private/
+docs/
 
 # Large PLC project files
 *.xml
