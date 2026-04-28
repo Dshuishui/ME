@@ -1,0 +1,210 @@
+meta:
+  source_file: prototype_raw.py
+  spec_strategy: S3-LLM-simplified
+  generator: spec_simplifier_s3.py
+  model: anthropic/claude-sonnet-4-6
+  note: Compressed version of S3-LLM spec. Semantic text fields (purpose, semantic_summary,
+    preconditions, postconditions) simplified by LLM to remove noise. Structural fields
+    copied verbatim.
+module_globals:
+- hw
+- ctrl
+constants:
+  SAFE_Z: 50000
+functions:
+  _hw_tick:
+    purpose: Simulate one PLC scan cycle by advancing hardware trigger flags to their
+      done states.
+    semantic_summary: For each active trigger flag (Z, XY, ADP draw, ADP arrange),
+      if the corresponding done flag is not set, sets it to True. For Z, also copies
+      hw.z_location to hw.z_actual and sets hw.z_motor_stable.
+    preconditions: null
+    postconditions:
+    - If hw.z_trigger was True and hw.z_done was False, hw.z_done is True, hw.z_actual
+      equals hw.z_location, and hw.z_motor_stable is True.
+    - If hw.xy_trigger was True and hw.xy_done was False, hw.xy_done is True.
+    - If hw.adp_draw_trigger was True and hw.adp_draw_done was False, hw.adp_draw_done
+      is True.
+    - If hw.adp_arrange_trigger was True and hw.adp_arrange_done was False, hw.adp_arrange_done
+      is True.
+    inputs: []
+    returns: null
+    calls: null
+    reads_globals:
+    - hw.z_trigger
+    - hw.z_done
+    - hw.z_location
+    - hw.xy_trigger
+    - hw.xy_done
+    - hw.adp_draw_trigger
+    - hw.adp_draw_done
+    - hw.adp_arrange_trigger
+    - hw.adp_arrange_done
+    writes_globals:
+    - hw.z_actual
+    - hw.z_done
+    - hw.z_motor_stable
+    - hw.xy_done
+    - hw.adp_draw_done
+    - hw.adp_arrange_done
+    source_anchor:
+      file: prototype_raw.py
+      lines: 83-96
+  _well_z:
+    purpose: Return the Z-axis pulse depth for a given well position index.
+    semantic_summary: Looks up well_pos in the module-level _WELL_Z_DEPTH dictionary
+      and returns the pulse count, defaulting to 80,000 if not found.
+    preconditions: null
+    postconditions:
+    - Returns an integer representing the Z-depth in pulses for the given well position.
+    inputs:
+    - name: well_pos
+      type: int
+      description: Zero-based index of the target well whose Z depth is required.
+    returns: int
+    calls: null
+    reads_globals: null
+    writes_globals: null
+    source_anchor:
+      file: prototype_raw.py
+      lines: 103-104
+  aspirate_from_well:
+    purpose: Execute a complete aspirate sequence (XY move, Z lower, pump draw, Z
+      raise) for a given well and volume.
+    semantic_summary: Guards on ctrl.autorun and ctrl.estop_ok, then fires four sequential
+      trigger/done cycles — XY to well_pos, Z down to well depth, ADP draw at converted
+      volume, Z up to SAFE_Z — calling _hw_tick() after each trigger to simulate completion.
+    preconditions:
+    - ctrl.autorun is True.
+    - ctrl.estop_ok is True.
+    postconditions:
+    - hw.xy_target is set to well_pos and hw.xy_done is True.
+    - hw.z_actual equals the Z depth of well_pos after lowering, then equals SAFE_Z
+      after raising.
+    - hw.adp_draw_volume is set to int(volume_ul * 10) and hw.adp_draw_done is True.
+    - hw.adp_draw_trigger is False on exit.
+    - hw.z_trigger is False on exit.
+    - hw.z_location equals SAFE_Z on exit.
+    inputs:
+    - name: well_pos
+      type: int
+      description: Index of the source well to aspirate from.
+    - name: volume_ul
+      type: float
+      description: Volume to aspirate in microlitres.
+    returns: null
+    calls:
+    - _hw_tick
+    - _well_z
+    reads_globals:
+    - ctrl.autorun
+    - ctrl.estop_ok
+    - hw.xy_trigger
+    - hw.xy_done
+    - hw.z_trigger
+    - hw.z_done
+    - hw.z_motor_stable
+    - hw.adp_draw_trigger
+    - hw.adp_draw_done
+    writes_globals:
+    - hw.xy_trigger
+    - hw.xy_done
+    - hw.xy_target
+    - hw.z_trigger
+    - hw.z_done
+    - hw.z_location
+    - hw.adp_draw_trigger
+    - hw.adp_draw_done
+    - hw.adp_draw_volume
+    source_anchor:
+      file: prototype_raw.py
+      lines: 109-160
+  dispense_to_well:
+    purpose: Execute a complete dispense sequence (XY move, Z lower, pump arrange,
+      Z raise) for a given well and volume.
+    semantic_summary: Guards on ctrl.autorun and ctrl.estop_ok, then fires four sequential
+      trigger/done cycles — XY to well_pos, Z down to well depth, ADP arrange at converted
+      volume (with 0→nonzero transition), Z up to SAFE_Z — calling _hw_tick() after
+      each trigger to simulate completion.
+    preconditions:
+    - ctrl.autorun is True.
+    - ctrl.estop_ok is True.
+    postconditions:
+    - hw.xy_target is set to well_pos and hw.xy_done is True.
+    - hw.z_actual equals the Z depth of well_pos after lowering, then equals SAFE_Z
+      after raising.
+    - hw.adp_arrange_volume is set to int(volume_ul * 10) and hw.adp_arrange_done
+      is True.
+    - hw.adp_arrange_trigger is False on exit.
+    - hw.z_trigger is False on exit.
+    - hw.z_location equals SAFE_Z on exit.
+    inputs:
+    - name: well_pos
+      type: int
+      description: Index of the destination well to dispense into.
+    - name: volume_ul
+      type: float
+      description: Volume to dispense in microlitres.
+    returns: null
+    calls:
+    - _hw_tick
+    - _well_z
+    reads_globals:
+    - ctrl.autorun
+    - ctrl.estop_ok
+    - hw.xy_trigger
+    - hw.xy_done
+    - hw.z_trigger
+    - hw.z_done
+    - hw.z_motor_stable
+    - hw.adp_arrange_trigger
+    - hw.adp_arrange_done
+    - hw.adp_arrange_volume
+    - hw.adp_draw_done
+    writes_globals:
+    - hw.xy_trigger
+    - hw.xy_done
+    - hw.xy_target
+    - hw.z_trigger
+    - hw.z_done
+    - hw.z_location
+    - hw.adp_arrange_trigger
+    - hw.adp_arrange_done
+    - hw.adp_arrange_volume
+    source_anchor:
+      file: prototype_raw.py
+      lines: 163-220
+  wash_tips:
+    purpose: Perform repeated aspirate/dispense cycles at a wash station.
+    semantic_summary: Guards on ctrl.autorun and ctrl.estop_ok, then calls aspirate_from_well
+      and dispense_to_well in alternation for the requested number of cycles, both
+      targeting wash_pos with wash_volume_ul.
+    preconditions:
+    - ctrl.autorun is True.
+    - ctrl.estop_ok is True.
+    postconditions:
+    - aspirate_from_well and dispense_to_well have each been called exactly 'cycles'
+      times with wash_pos and wash_volume_ul.
+    - All hardware state postconditions of aspirate_from_well and dispense_to_well
+      hold after the final cycle.
+    inputs:
+    - name: wash_pos
+      type: int
+      description: Well index of the wash station.
+    - name: wash_volume_ul
+      type: float
+      description: Volume per wash aspiration/dispense cycle in microlitres.
+    - name: cycles
+      type: int
+      description: Number of aspirate+dispense wash cycles to perform (default 3).
+    returns: null
+    calls:
+    - aspirate_from_well
+    - dispense_to_well
+    reads_globals:
+    - ctrl.autorun
+    - ctrl.estop_ok
+    writes_globals: null
+    source_anchor:
+      file: prototype_raw.py
+      lines: 223-232
