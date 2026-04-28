@@ -1,0 +1,163 @@
+meta:
+  source_file: prototype_raw.py
+  spec_strategy: S2-AST+Clone
+  generator: spec_generator_s2.py
+  note: 'S1 lean spec augmented with code-clone detection (Algorithm A: hw.*/ctrl.*
+    write-op sequence matching via SequenceMatcher). clone_hints report which function
+    pairs share structurally identical write-op subsequences, with source-line ranges
+    for each block.'
+module_globals:
+- hw
+- ctrl
+constants:
+  SAFE_Z: 50000
+functions:
+  _hw_tick:
+    purpose: null
+    inputs: null
+    returns: null
+    calls: null
+    reads_globals:
+    - hw.adp_arrange_done
+    - hw.adp_arrange_trigger
+    - hw.adp_draw_done
+    - hw.adp_draw_trigger
+    - hw.xy_done
+    - hw.xy_trigger
+    - hw.z_done
+    - hw.z_location
+    - hw.z_trigger
+    writes_globals:
+    - hw.adp_arrange_done
+    - hw.adp_draw_done
+    - hw.xy_done
+    - hw.z_actual
+    - hw.z_done
+    - hw.z_motor_stable
+    source_anchor:
+      file: prototype_raw.py
+      lines: 83-96
+    clone_hints: null
+  _well_z:
+    purpose: null
+    inputs:
+    - name: well_pos
+      type: int
+    returns: int
+    calls: null
+    reads_globals: null
+    writes_globals: null
+    source_anchor:
+      file: prototype_raw.py
+      lines: 103-104
+    clone_hints: null
+  aspirate_from_well:
+    purpose: 'Full aspirate sequence: move XY → lower Z → aspirate → raise Z.'
+    inputs:
+    - name: well_pos
+      type: int
+    - name: volume_ul
+      type: float
+    returns: None
+    calls:
+    - _hw_tick
+    - _well_z
+    reads_globals:
+    - ctrl.autorun
+    - ctrl.estop_ok
+    - hw.adp_draw_done
+    - hw.adp_draw_trigger
+    - hw.xy_done
+    - hw.xy_trigger
+    - hw.z_done
+    - hw.z_motor_stable
+    - hw.z_trigger
+    writes_globals:
+    - hw.adp_draw_done
+    - hw.adp_draw_trigger
+    - hw.adp_draw_volume
+    - hw.xy_done
+    - hw.xy_target
+    - hw.xy_trigger
+    - hw.z_done
+    - hw.z_location
+    - hw.z_trigger
+    source_anchor:
+      file: prototype_raw.py
+      lines: 109-160
+    clone_hints:
+    - similar_to: dispense_to_well
+      similarity: 0.68
+      matching_blocks:
+      - self_lines: 117-134
+        other_lines: 171-188
+        similarity: 1.0
+      - self_lines: 151-160
+        other_lines: 211-220
+        similarity: 1.0
+  dispense_to_well:
+    purpose: 'Full dispense sequence: move XY → lower Z → dispense → raise Z.'
+    inputs:
+    - name: well_pos
+      type: int
+    - name: volume_ul
+      type: float
+    returns: None
+    calls:
+    - _hw_tick
+    - _well_z
+    reads_globals:
+    - ctrl.autorun
+    - ctrl.estop_ok
+    - hw.adp_arrange_done
+    - hw.adp_arrange_trigger
+    - hw.adp_arrange_volume
+    - hw.xy_done
+    - hw.xy_trigger
+    - hw.z_done
+    - hw.z_motor_stable
+    - hw.z_trigger
+    writes_globals:
+    - hw.adp_arrange_done
+    - hw.adp_arrange_trigger
+    - hw.adp_arrange_volume
+    - hw.xy_done
+    - hw.xy_target
+    - hw.xy_trigger
+    - hw.z_done
+    - hw.z_location
+    - hw.z_trigger
+    source_anchor:
+      file: prototype_raw.py
+      lines: 163-220
+    clone_hints:
+    - similar_to: aspirate_from_well
+      similarity: 0.68
+      matching_blocks:
+      - self_lines: 171-188
+        other_lines: 117-134
+        similarity: 1.0
+      - self_lines: 211-220
+        other_lines: 151-160
+        similarity: 1.0
+  wash_tips:
+    purpose: 'Wash cycle: alternating aspirate + dispense at wash station.'
+    inputs:
+    - name: wash_pos
+      type: int
+    - name: wash_volume_ul
+      type: float
+    - name: cycles
+      type: int
+    returns: None
+    calls:
+    - aspirate_from_well
+    - dispense_to_well
+    reads_globals:
+    - ctrl.autorun
+    - ctrl.estop_ok
+    writes_globals: null
+    source_anchor:
+      file: prototype_raw.py
+      lines: 223-232
+    clone_hints: null

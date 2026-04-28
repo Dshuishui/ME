@@ -24,3 +24,4 @@ build/
 
 # Claude session files
 CONTEXT*.md
+CLAUDE.md

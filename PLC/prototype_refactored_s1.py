@@ -1,6 +1,6 @@
 """
-prototype_refactored.py
-=======================
+prototype_refactored_s1.py
+==========================
 Post-modularization version of prototype_raw.py.
 
 Atomic modules extracted per LLM analysis (Exp01, S1-AST strategy):

@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-spec_generator.py — S1 strategy: lean spec extracted from Python AST
+spec_generator_s1.py — S1 strategy: lean spec extracted from Python AST
 
 Auto-extracts from each top-level function:
   purpose        — first line of docstring
@@ -16,7 +16,7 @@ Intentionally omits (cannot be derived from AST alone):
   redundancy / clone analysis  (that is S2's job)
 
 Usage:
-  python3 spec_generator.py <source.py> [output.yaml]
+  python3 spec_generator_s1.py <source.py> [output.yaml]
 """
 
 import ast
@@ -167,7 +167,7 @@ def build_spec(source_path: Path) -> dict:
         'meta': {
             'source_file':    source_path.name,
             'spec_strategy':  'S1-AST',
-            'generator':      'spec_generator.py',
+            'generator':      'spec_generator_s1.py',
             'note': (
                 'Lean spec auto-extracted via Python AST. '
                 'Contains structure only: interface, call graph, '

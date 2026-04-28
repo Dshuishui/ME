@@ -1,7 +1,7 @@
 """
-test_equivalence.py
-===================
-Verify that prototype_refactored.py produces identical hardware state
+test_equivalence_s1.py
+======================
+Verify that prototype_refactored_s1.py produces identical hardware state
 to prototype_raw.py for the same sequence of operations.
 
 This constitutes the validation step of the pipeline:
@@ -14,14 +14,14 @@ Each test:
   3. Asserts that the resulting hw state is identical
 
 Run:
-  python3 test_equivalence.py
+  python3 test_equivalence_s1.py
 """
 
 import dataclasses
 import traceback
 
 import prototype_raw       as raw
-import prototype_refactored as ref
+import prototype_refactored_s1 as ref
 
 
 # ── Helpers ───────────────────────────────────────────────────────────────────
