@@ -1,0 +1,25 @@
+# Private documents and data (not for public release)
+private/
+
+# Large PLC project files
+*.xml
+
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+venv/
+dist/
+build/
+
+# macOS
+.DS_Store
+
+# Editor
+.vscode/
+.idea/
+*.swp
+
+# Claude session files
+CONTEXT*.md
