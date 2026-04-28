@@ -1,0 +1,314 @@
+# =============================================================================
+# prototype_spec.yaml
+# Full spec for prototype_raw.py (pre-modularization version)
+#
+# Schema overview:
+#   global_state   — shared mutable objects all functions read/write
+#   constants      — named global constants
+#   functions      — one entry per callable, with interface + behaviour fields
+#
+# Each function entry carries:
+#   purpose        — what it does (one line)
+#   layer          — 1=hardware-atomic, 2=operation, 3=orchestration
+#   inputs / outputs — explicit parameters
+#   preconditions  — must hold before call
+#   postconditions — guaranteed after successful return
+#   reads_globals / writes_globals — implicit state dependencies
+#   calls          — other functions invoked
+#   inline_sequences — repeated code blocks embedded in this function body
+#     (these are the candidates for extraction as atomic modules)
+#   source_anchor  — file + line range for reverse lookup
+# =============================================================================
+
+global_state:
+  hw:
+    type: HardwareState
+    description: >
+      Singleton representing all hardware registers.
+      Mutated directly by every operation function (no parameter passing).
+      Equivalent to PLC global variables Pipette_NOmaintain / Pipette_gun.
+    fields:
+      z_location:       { type: int,  description: "Z-axis target position command (pulses)" }
+      z_trigger:        { type: bool, description: "Z positioning trigger (False→True edge fires move)" }
+      z_done:           { type: bool, description: "Z positioning complete flag" }
+      z_actual:         { type: int,  description: "Z-axis real position (set by simulator)" }
+      z_motor_stable:   { type: bool, description: "True when motor has stopped vibrating" }
+      xy_target:        { type: int,  description: "XY gantry target well position" }
+      xy_trigger:       { type: bool, description: "XY positioning trigger" }
+      xy_done:          { type: bool, description: "XY positioning complete flag" }
+      adp_draw_volume:  { type: int,  description: "Aspirate pump target volume (0.1 µL units)" }
+      adp_draw_trigger: { type: bool, description: "Aspirate pump trigger" }
+      adp_draw_done:    { type: bool, description: "Aspirate pump complete flag" }
+      adp_arrange_volume:  { type: int,  description: "Dispense pump target volume (0.1 µL units)" }
+      adp_arrange_trigger: { type: bool, description: "Dispense pump trigger" }
+      adp_arrange_done:    { type: bool, description: "Dispense pump complete flag" }
+
+  ctrl:
+    type: MachineControl
+    description: >
+      Global run/stop signals. Equivalent to G_MasterControl.
+    fields:
+      autorun:  { type: bool, description: "True = system is running; False = paused" }
+      estop_ok: { type: bool, description: "True = no emergency stop active" }
+
+constants:
+  SAFE_Z:
+    value: 50000
+    unit: pulses
+    description: "Safe travel height; Z is raised here before any XY movement"
+    source_anchor: { file: prototype_raw.py, line: 76 }
+
+# =============================================================================
+# Shared trigger-sequence patterns
+#
+# These patterns appear inline (copy-pasted) inside multiple functions.
+# They are the primary candidates for extraction into atomic modules.
+# =============================================================================
+
+trigger_sequence_patterns:
+
+  z_move:
+    description: >
+      Move Z-axis to a target position and wait until motor is stable.
+      4-step handshake: clear flags → wait clear confirmation →
+      write target + fire trigger → wait done AND motor stable.
+    steps:
+      - clear:   "hw.z_trigger = False; hw.z_done = False"
+      - confirm: "assert not hw.z_trigger and not hw.z_done"
+      - fire:    "hw.z_location = <target>; hw.z_trigger = True"
+      - wait:    "assert hw.z_done and hw.z_motor_stable"
+    cleanup:     "hw.z_trigger = False"
+    parameter:   z_location_value
+    occurrences:
+      - { function: aspirate_from_well, step: "Step 2 lower", lines: "128-136" }
+      - { function: aspirate_from_well, step: "Step 4 raise", lines: "151-160" }
+      - { function: dispense_to_well,   step: "Step 2 lower", lines: "182-190" }
+      - { function: dispense_to_well,   step: "Step 4 raise", lines: "211-220" }
+    redundancy_note: >
+      Identical 6-line block appears 4 times; only the value written to
+      hw.z_location differs.  Should be extracted as atomic module move_z(target).
+
+  xy_move:
+    description: >
+      Move XY gantry to a well position and wait for completion.
+    steps:
+      - clear:   "hw.xy_trigger = False; hw.xy_done = False"
+      - confirm: "assert not hw.xy_trigger and not hw.xy_done"
+      - fire:    "hw.xy_target = <well_pos>; hw.xy_trigger = True"
+      - wait:    "assert hw.xy_done"
+    parameter:   xy_target_value
+    occurrences:
+      - { function: aspirate_from_well, step: "Step 1", lines: "117-125" }
+      - { function: dispense_to_well,   step: "Step 1", lines: "171-179" }
+    redundancy_note: >
+      Identical block in two functions.  Should be extracted as move_xy(well_pos).
+
+# =============================================================================
+# Function specs
+# =============================================================================
+
+functions:
+
+  aspirate_from_well:
+    purpose: "Move to a well, lower Z, aspirate a volume, raise Z to safe height"
+    layer: 2
+    source_anchor: { file: prototype_raw.py, lines: "109-161" }
+    inputs:
+      well_pos:   { type: int,   description: "Target well index (0-based)" }
+      volume_ul:  { type: float, description: "Volume to aspirate in µL" }
+    outputs: []
+    preconditions:
+      - "ctrl.autorun == True"
+      - "ctrl.estop_ok == True"
+      - "hw.z_actual == SAFE_Z  # Z must be at safe height before call"
+      - "No prior trigger flags are residually True"
+    postconditions:
+      - "hw.z_actual == SAFE_Z  # Z returned to safe height"
+      - "hw.adp_draw_done == True  # aspirate completed"
+      - "hw.xy_done == True  # XY reached target"
+      - "hw.z_motor_stable == True"
+    reads_globals:
+      - ctrl.autorun
+      - ctrl.estop_ok
+      - hw.xy_done
+      - hw.z_done
+      - hw.z_motor_stable
+      - hw.adp_draw_done
+    writes_globals:
+      - hw.xy_target
+      - hw.xy_trigger
+      - hw.xy_done
+      - hw.z_location
+      - hw.z_trigger
+      - hw.z_done
+      - hw.adp_draw_volume
+      - hw.adp_draw_trigger
+      - hw.adp_draw_done
+    calls: [ _well_z, _hw_tick ]
+    inline_sequences:
+      - pattern: xy_move
+        step: "Step 1"
+        target_expr: "well_pos"
+      - pattern: z_move
+        step: "Step 2 — lower to well"
+        target_expr: "_well_z(well_pos)"
+      - pattern: z_move
+        step: "Step 4 — raise to SAFE_Z"
+        target_expr: "SAFE_Z"
+    global_coupling_note: >
+      Writes hw.adp_draw_done = False before firing pump.
+      dispense_to_well implicitly relies on adp_draw_done == True
+      to infer the pump barrel has liquid — shared state, not a parameter.
+
+  dispense_to_well:
+    purpose: "Move to a well, lower Z, dispense a volume, raise Z to safe height"
+    layer: 2
+    source_anchor: { file: prototype_raw.py, lines: "163-221" }
+    inputs:
+      well_pos:   { type: int,   description: "Target well index (0-based)" }
+      volume_ul:  { type: float, description: "Volume to dispense in µL" }
+    outputs: []
+    preconditions:
+      - "ctrl.autorun == True"
+      - "ctrl.estop_ok == True"
+      - "hw.z_actual == SAFE_Z"
+      - "hw.adp_draw_done == True  # pump must have liquid from prior aspirate"
+    postconditions:
+      - "hw.z_actual == SAFE_Z"
+      - "hw.adp_arrange_done == True"
+      - "hw.z_motor_stable == True"
+    reads_globals:
+      - ctrl.autorun
+      - ctrl.estop_ok
+      - hw.adp_draw_done        # implicitly used to infer pump state [Pattern B]
+      - hw.xy_done
+      - hw.z_done
+      - hw.z_motor_stable
+      - hw.adp_arrange_done
+    writes_globals:
+      - hw.xy_target
+      - hw.xy_trigger
+      - hw.xy_done
+      - hw.z_location
+      - hw.z_trigger
+      - hw.z_done
+      - hw.adp_arrange_volume
+      - hw.adp_arrange_trigger
+      - hw.adp_arrange_done
+    calls: [ _well_z, _hw_tick ]
+    inline_sequences:
+      - pattern: xy_move
+        step: "Step 1"
+        target_expr: "well_pos"
+      - pattern: z_move
+        step: "Step 2 — lower to well"
+        target_expr: "_well_z(well_pos)"
+      - pattern: z_move
+        step: "Step 4 — raise to SAFE_Z"
+        target_expr: "SAFE_Z"
+    special_note: >
+      hw.adp_arrange_volume must be set to 0 before writing the real value.
+      The simulated driver detects a new command via 0→nonzero transition.
+      Mirrors the PLC F20_06 Step 110 quirk.
+
+  wash_tips:
+    purpose: "Aspirate and dispense repeatedly at a wash station to clean tips"
+    layer: 3
+    source_anchor: { file: prototype_raw.py, lines: "223-233" }
+    inputs:
+      wash_pos:       { type: int,   description: "Well index of the wash station" }
+      wash_volume_ul: { type: float, description: "Volume per aspirate/dispense cycle (µL)" }
+      cycles:         { type: int,   description: "Number of wash repetitions (default 3)" }
+    outputs: []
+    preconditions:
+      - "ctrl.autorun == True"
+      - "ctrl.estop_ok == True"
+    postconditions:
+      - "hw.z_actual == SAFE_Z  # Z safe after final dispense"
+    reads_globals:
+      - ctrl.autorun
+      - ctrl.estop_ok
+    writes_globals: []   # all writes delegated to callee
+    calls:
+      - aspirate_from_well
+      - dispense_to_well
+    orchestration_note: >
+      Pure sequencing layer — no direct hardware access.
+      Mirrors the Layer-3 / step-level PLC module that composes Layer-2 operations.
+
+  _well_z:
+    purpose: "Look up the Z depth (pulses) for a given well position"
+    layer: 1
+    source_anchor: { file: prototype_raw.py, lines: "103-104" }
+    inputs:
+      well_pos: { type: int, description: "Well index" }
+    outputs:
+      return:   { type: int, description: "Z depth in pulses" }
+    reads_globals: []
+    writes_globals: []
+    calls: []
+    note: "Pure function — no side effects. Equivalent to G_zhenlieZ interpolation FB in PLC."
+
+  _hw_tick:
+    purpose: "Simulate one PLC scan cycle: advance hardware state based on current trigger flags"
+    layer: 0
+    source_anchor: { file: prototype_raw.py, lines: "83-96" }
+    inputs: []
+    outputs: []
+    reads_globals:
+      - hw.z_trigger
+      - hw.xy_trigger
+      - hw.adp_draw_trigger
+      - hw.adp_arrange_trigger
+    writes_globals:
+      - hw.z_actual
+      - hw.z_done
+      - hw.z_motor_stable
+      - hw.xy_done
+      - hw.adp_draw_done
+      - hw.adp_arrange_done
+    note: >
+      Not a real module — test harness only.
+      Equivalent to the PLC runtime that executes hardware FBs every scan cycle.
+
+# =============================================================================
+# Redundancy summary (for LLM analysis)
+# =============================================================================
+
+redundancy_summary:
+  - id: R1
+    pattern: z_move
+    severity: high
+    occurrences: 4
+    description: >
+      The Z-axis trigger handshake (6 lines) is copy-pasted 4 times.
+      Extraction candidate: move_z(target: int) -> None
+      Deduplication: replaces ~24 lines with 4 call sites of 1 line each.
+
+  - id: R2
+    pattern: xy_move
+    severity: medium
+    occurrences: 2
+    description: >
+      The XY gantry trigger handshake (5 lines) is copy-pasted twice.
+      Extraction candidate: move_xy(well_pos: int) -> None
+      Deduplication: replaces ~10 lines with 2 call sites.
+
+  - id: R3
+    pattern: global_state_coupling
+    severity: medium
+    description: >
+      aspirate_from_well and dispense_to_well are coupled through
+      hw.adp_draw_done: dispense assumes the pump barrel has liquid
+      because aspirate ran first.  This implicit precondition is not
+      expressed in either function's signature — it is only visible
+      by tracing global state.
+      Fix: add an explicit has_liquid: bool parameter or return value.
+
+  - id: R4
+    pattern: layer_3_delegation
+    severity: low
+    description: >
+      wash_tips does no direct hardware work; it only sequences
+      two Layer-2 calls.  This confirms a clean 3-layer hierarchy
+      exists and can be made explicit.
