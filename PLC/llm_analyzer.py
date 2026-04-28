@@ -9,11 +9,14 @@ Output format: two-stage (Option C)
 Results are printed to stdout and optionally saved to a Markdown experiment log.
 
 Usage:
-  python3 llm_analyzer.py <spec.yaml> [--save <exp_log.md>]
+  python3 llm_analyzer.py <spec.yaml> [--save <exp_log.md>] [--model <model>]
+
+Auth (checked in order):
+  OpenRouter: set ANTHROPIC_BASE_URL + ANTHROPIC_AUTH_TOKEN  (e.g. via claude-or alias)
+  Anthropic:  set ANTHROPIC_API_KEY
 
 Requires:
-  pip install anthropic pyyaml
-  ANTHROPIC_API_KEY set in environment
+  pip install anthropic pyyaml "httpx[socks]"
 """
 
 import argparse
@@ -27,7 +30,7 @@ import anthropic
 import yaml
 
 
-MODEL   = 'claude-opus-4-7'
+DEFAULT_MODEL = 'anthropic/claude-sonnet-4-6'
 MAX_TOKENS = 4096
 
 # ── Prompt ────────────────────────────────────────────────────────────────────
@@ -99,13 +102,34 @@ def build_user_prompt(spec: dict) -> str:
     )
 
 
+# ── API client ────────────────────────────────────────────────────────────────
+
+def make_client() -> anthropic.Anthropic:
+    """
+    Build Anthropic client, preferring OpenRouter when ANTHROPIC_AUTH_TOKEN is set.
+    Falls back to standard ANTHROPIC_API_KEY for direct Anthropic API access.
+    """
+    auth_token = os.environ.get('ANTHROPIC_AUTH_TOKEN')
+    base_url   = os.environ.get('ANTHROPIC_BASE_URL')
+
+    if auth_token and base_url:
+        return anthropic.Anthropic(base_url=base_url, auth_token=auth_token)
+
+    api_key = os.environ.get('ANTHROPIC_API_KEY')
+    if api_key:
+        return anthropic.Anthropic(api_key=api_key)
+
+    print('Error: set ANTHROPIC_AUTH_TOKEN+ANTHROPIC_BASE_URL (OpenRouter) '
+          'or ANTHROPIC_API_KEY (Anthropic)', file=sys.stderr)
+    sys.exit(1)
+
+
 # ── API call ──────────────────────────────────────────────────────────────────
 
-def run_analysis(spec: dict) -> str:
-    client = anthropic.Anthropic(api_key=os.environ['ANTHROPIC_API_KEY'])
-
+def run_analysis(spec: dict, model: str) -> str:
+    client = make_client()
     message = client.messages.create(
-        model=MODEL,
+        model=model,
         max_tokens=MAX_TOKENS,
         system=SYSTEM_PROMPT,
         messages=[
@@ -128,7 +152,8 @@ def split_response(response: str) -> tuple[str, str]:
 
 # ── Experiment log ────────────────────────────────────────────────────────────
 
-def save_experiment_log(spec_path: Path, response: str, out_path: Path) -> None:
+def save_experiment_log(spec_path: Path, response: str, out_path: Path,
+                        model: str) -> None:
     free_text, structured = split_response(response)
     now = datetime.now().strftime('%Y-%m-%d %H:%M')
 
@@ -136,7 +161,7 @@ def save_experiment_log(spec_path: Path, response: str, out_path: Path) -> None:
 # Exp01 — S1 Strategy: AST Lean Spec + LLM Analysis
 
 **Date**: {now}
-**Model**: {MODEL}
+**Model**: {model}
 **Spec file**: {spec_path.name}
 **Spec strategy**: S1-AST (auto-generated, no redundancy annotations)
 
@@ -185,13 +210,15 @@ def main() -> None:
     parser.add_argument('spec', help='Path to spec YAML file')
     parser.add_argument('--save', metavar='FILE',
                         help='Save experiment log to this Markdown file')
+    parser.add_argument('--model', default=DEFAULT_MODEL,
+                        help=f'Model to use (default: {DEFAULT_MODEL})')
     args = parser.parse_args()
 
     spec_path = Path(args.spec)
     spec = yaml.safe_load(spec_path.read_text(encoding='utf-8'))
 
-    print(f'Sending {spec_path.name} to {MODEL}...')
-    response = run_analysis(spec)
+    print(f'Sending {spec_path.name} to {args.model}...')
+    response = run_analysis(spec, args.model)
 
     free_text, structured = split_response(response)
 
@@ -206,7 +233,7 @@ def main() -> None:
     print(structured)
 
     if args.save:
-        save_experiment_log(spec_path, response, Path(args.save))
+        save_experiment_log(spec_path, response, Path(args.save), args.model)
 
 
 if __name__ == '__main__':
